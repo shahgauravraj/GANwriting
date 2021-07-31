@@ -1,8 +1,11 @@
 import wandb
 import string
 import cv2
+import doc2txt
 import numpy as np
+from torch.utils.data import DataLoader, TensorDataset
 from models import GenModel_FC
+from collections import defaultdict
 
 # special tokens
 START = 0
@@ -34,6 +37,7 @@ def get_model():
     gen.load_state_dict(state_dict)
     return gen
 
+
 def normalize(img):
     """Normalizes images to the range 0..255.
 
@@ -47,6 +51,53 @@ def normalize(img):
     img *= 255
     img = np.uint8(img)
     return img
+
+
+def get_words(text):
+    """Converts a long string of text into constituent words, and produces a dict of indices to put the spaces and indents.
+    Each word is counted as one or more images depending on its size.
+    Each line is considered as an array of images. 
+    The spaces and indents dicts have indices to where the spaces and indents would be in the array.
+    Each space and indent counts as one image.
+
+    Args:
+        text (string): The document to convert in string form.
+
+    Returns:
+        words(List[List[string]]): A list of lists of words.
+        spaces(dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of spaces. 
+        indents(dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of indents. 
+    """
+    def strip(s):
+        return s.rstrip()
+
+    lines = list(map(strip, text.split("\n")))[::2]
+    words = []
+    spaces = defaultdict(set)
+    indents = defaultdict(set)
+
+    for i, line in enumerate(lines):
+        word_line = []
+        w = []
+        counts = 0
+        for j, c in enumerate(line): 
+            if c=='\t':
+                indents[i].add((counts-1)//10 + 1)
+                counts = 10 * (counts//10 + 1)
+                continue
+            elif c==' ':
+                spaces[i].add((counts-1)//10 + 1)
+                counts = 10 * (counts//10 + 2)
+                word_line.append("".join(w))
+                w = []
+            else:
+                w.append(c)
+                counts += 1
+        if len(w):
+            word_line.append("".join(w))
+        words.append(word_line)
+    return words, spaces, indents
+
 
 def convert_and_pad(word):
     """Converts the word to a list of tokens padded to read length 12.
@@ -72,7 +123,7 @@ def preprocess_text(words, max_input_size=10):
         max_input_size (int): The max number of tokens in each input
 
     Returns:
-        torch.tensor: A batch of words converted into a tensor.
+        torch.data.utils.DataLoader: A dataloader to the dataset of words converted to tensors with batch size 8.
     """       
     new_words = []
     for w in words:
@@ -82,7 +133,9 @@ def preprocess_text(words, max_input_size=10):
             w = w[max_input_size:]
             w_len -= max_input_size
         
-    return torch.from_numpy(np.array(new_words))   
+    new_words = torch.from_numpy(np.array(new_words))
+    dataset = TensorDataset(new_words)
+    return DataLoader(dataset, batch_size=8, shuffle=False)   
 
 def preprocess_images(imgs):
     """Rescales, resizes and binarizes a batch of images of handwritten words and returns it as a tensor.
