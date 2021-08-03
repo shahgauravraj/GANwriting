@@ -1,7 +1,7 @@
 import wandb
 import string
 import cv2
-import doc2txt
+import torch
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 from models import GenModel_FC
@@ -21,12 +21,14 @@ def get_model():
     """Downloads the model artifact from wandb and loads the weights from it into a new generator object.
 
     Returns:
-        (torch.nn.moule): The pretrained generator model.
+        gen (torch.nn.moule): The pretrained generator model.
+        device (string): The device the model is on (cuda/cpu).
     """    
     api = wandb.Api()
     artifact = api.artifact('bijin/GANwriting_Reproducibilty_Challenge/GANwriting:v237', type='model')
     model_dir = artifact.download() + '/contran-5000.model'
     
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     weights = torch.load(model_dir)
     gen = GenModel_FC(12)
     state_dict = gen.state_dict()
@@ -35,22 +37,30 @@ def get_model():
         state_dict[key] = weights['gen.' + key]
     
     gen.load_state_dict(state_dict)
-    return gen
+    gen = gen.to(device)
+    return gen, device
 
 
-def normalize(img):
-    """Normalizes images to the range 0..255.
+def strip(s):    
+    return s.rstrip()
+
+
+def update_dicts(w, words, d, imgs_per_line, idx):
+    """Updates the given dict as well as imgs_per_line and words list.
 
     Args:
-        img (np.array): 3D array of floats.
-
-    Returns:
-        img (np.array): 3D array of 8-bit unsigned ints .
+        w (string): Current word.
+        words (List[string]): The list of found words.
+        d (dict[set[int]]): The dict to be updated.
+        imgs_per_line (dict[int]): A dict of ints to store number of images in each line.
+        idx (int): An index to the above dicts and list.
     """    
-    img = (img - img.min()) / (img.max() - img.min())
-    img *= 255
-    img = np.uint8(img)
-    return img
+    if len(w):
+        words.append("".join(w))
+        imgs_per_line[idx] += (len(w) - 1)//10 + 1
+
+    d[idx].add(imgs_per_line[idx])
+    imgs_per_line[idx] += 1
 
 
 def get_words(text):
@@ -67,36 +77,35 @@ def get_words(text):
         words(List[List[string]]): A list of lists of words.
         spaces(dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of spaces. 
         indents(dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of indents. 
+        imgs_per_line(dict[int]): A dict of the number of images in each line.
     """
-    def strip(s):
-        return s.rstrip()
-
     lines = list(map(strip, text.split("\n")))[::2]
+    
     words = []
     spaces = defaultdict(set)
     indents = defaultdict(set)
+    imgs_per_line = defaultdict(int)
 
     for i, line in enumerate(lines):
-        word_line = []
         w = []
-        counts = 0
-        for j, c in enumerate(line): 
+        for c in line: 
             if c=='\t':
-                indents[i].add((counts-1)//10 + 1)
-                counts = 10 * (counts//10 + 1)
-                continue
-            elif c==' ':
-                spaces[i].add((counts-1)//10 + 1)
-                counts = 10 * (counts//10 + 2)
-                word_line.append("".join(w))
+                update_dicts(w, words, indents, imgs_per_line, i)
                 w = []
+        
+            elif c==' ':
+                update_dicts(w, words, spaces, imgs_per_line, i)
+                w = []
+
             else:
                 w.append(c)
-                counts += 1
+        
         if len(w):
-            word_line.append("".join(w))
-        words.append(word_line)
-    return words, spaces, indents
+            words.append("".join(w))
+            imgs_per_line[i] += (len(w) - 1)//10 + 1
+        
+
+    return words, spaces, indents, imgs_per_line
 
 
 def convert_and_pad(word):
@@ -113,6 +122,7 @@ def convert_and_pad(word):
     if len(new_word) < 12: # if too short, pad with PADDING token
         new_word.extend([PADDING] * (12 - len(new_word))) 
     return new_word
+
 
 def preprocess_text(words, max_input_size=10):
     """Converts the each word into a list of tokens, bounded by start and end token. 
@@ -137,6 +147,7 @@ def preprocess_text(words, max_input_size=10):
     dataset = TensorDataset(new_words)
     return DataLoader(dataset, batch_size=8, shuffle=False)   
 
+
 def preprocess_images(imgs):
     """Rescales, resizes and binarizes a batch of images of handwritten words and returns it as a tensor.
     If there are less than 50 images, the original list is shuffled and repeated until 50 is reached.
@@ -158,6 +169,61 @@ def preprocess_images(imgs):
     new_imgs = np.array(new_imgs)
     return torch.from_numpy(new_imgs)
 
-def postprocess_images(imgs, doc):
-    #TODO
-    pass
+
+def normalize(img):
+    """Normalizes images to the range 0..255.
+
+    Args:
+        img (np.array): 3D array of floats.
+
+    Returns:
+        img (np.array): 3D array of 8-bit unsigned ints .
+    """    
+    img = (img - img.min()) / (img.max() - img.min())
+    img *= 255
+    img = np.uint8(img)
+    return img
+
+
+def convert_to_images(text_dataloader, preprocessed_imgs, device):
+    """Converts the words from the document to handwritten word images in the style of preprocessed_images.
+
+    Args:
+        text_dataloader (torch.utils.data.DataLoader): DataLoader object for the words from the document. 
+        preprocessed_imgs (torch.tensor): The handwritting images after preprocessing.
+        device (string): The device on which to do the conversion(cuda/cpu).
+
+    Returns:
+        List[np.array]: A list of images as numpy arrays.
+    """    
+    with torch.no_grad():
+        style = gen.enc_image(preprocessed_imgs.to(device))
+
+        imgs = []
+        for idx, word_batch in enumerate(text_dataloader):
+            word_batch = word_batch.to(device)
+
+            f_xt, f_embed = gen.enc_text(word_batch, style.shape)
+            f_mix = gen.mix(style[0:2], f_embed)
+            xg = gen.decode(f_mix, f_xt).cpu().detach().numpy()
+
+            for x in xg:
+                imgs.append(normalize(x.squeeze()))
+    
+    return imgs
+
+
+def postprocess_images(imgs, spaces, indents, imgs_per_line):
+    """Converts the list of np.array to a pdf file.
+
+    Args:
+        imgs (List[np.array]): An np.array of imgs of words in handwritten form. 
+        spaces (dict[set[int]]): A dict of sets of ints containing positions of spaces in each line. 
+        indents (dict[set[int]]): A dict of sets of ints containing the positions of indents in each ine.
+        imgs_per_line (dict[int]): A dict of ints containing number of images to put in each line. 
+
+    Returns:
+        file: The handwritten document in pdf form.
+    """
+    # TODO
+    return ret
