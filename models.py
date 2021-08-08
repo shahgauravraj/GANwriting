@@ -67,7 +67,7 @@ class TextEncoder_FC(nn.Module):
 
         padding_reps = f_xs_shape[-1] % ts
         if padding_reps:
-            embedded_padding_char = self.embed(torch.full((1, 1), tokens['PAD_TOKEN'], dtype=torch.long).cuda())
+            embedded_padding_char = self.embed(torch.full((1, 1), 2, dtype=torch.long).cuda())
             embedded_padding_char = self.linear(embedded_padding_char)
             padding = embedded_padding_char.repeat(batch_size, padding_reps, 1)
             tensor_list.append(padding)

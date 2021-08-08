@@ -3,11 +3,14 @@ import string
 import cv2
 import torch
 import random
+import docx2txt
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 from models import GenModel_FC
 from collections import defaultdict
 from PIL import Image
+
+counter = 0
 
 # special tokens
 START = 0
@@ -119,7 +122,9 @@ def convert_and_pad(word):
     Returns:
        new_word (List[int]): A list of ints representing the tokens. 
     """    
-    new_word = [letter2index[w] for w in word] # Converting each character to its token value 
+    for w in word:
+        if w in letter2index:
+            new_word.append(letter2index[w]) # Converting each character to its token value, ignoring special non alphabetic characters
     new_word = [START] + new_word + [STOP] # START + chars + STOP
     if len(new_word) < 12: # if too short, pad with PADDING token
         new_word.extend([PADDING] * (12 - len(new_word))) 
@@ -131,7 +136,7 @@ def preprocess_text(text, max_input_size=10):
     Padding tokens added if necessary to reach max_input_size and splitting if the original word is too long.
 
     Args:
-        text (string): The document to convert in string form.
+        text (file): The document to convert in string form.
         max_input_size (int): The max number of tokens in each input
 
     Returns:
@@ -139,7 +144,9 @@ def preprocess_text(text, max_input_size=10):
         spaces (dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of spaces. 
         indents (dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of indents. 
         imgs_per_line (dict[int]): A dict of the number of images in each line.
-    """       
+    """
+    text_path = random.choice(string.ascii_letters)    
+    text.save()
     words, spaces, indents, imgs_per_line = get_words(text)
     new_words = []
 
@@ -152,6 +159,7 @@ def preprocess_text(text, max_input_size=10):
         
     new_words = torch.from_numpy(np.array(new_words))
     dataset = TensorDataset(new_words)
+
     return DataLoader(dataset, batch_size=8, shuffle=False), spaces, indents, imgs_per_line
 
 
@@ -167,12 +175,12 @@ def shuffle_and_repeat(imgs):
     new_imgs = []
     l = len(imgs)
     idx = l
-    shuffle = list(range(l))
+    shuf = list(range(l))
     while len(new_imgs) < 50:
         if idx == l:
-            shuffle = random.shuffle(shuffle)
+            random.shuffle(shuf)
             idx = 0
-        new_imgs.append(imgs[shuffle[idx]])
+        new_imgs.append(imgs[shuf[idx]])
         idx += 1
     return new_imgs
 
@@ -182,7 +190,7 @@ def preprocess_images(imgs):
     If there are less than 50 images, the original list is shuffled and repeated until 50 is reached.
 
     Args:
-        imgs (Image): Original batch of handwritten word image.
+        imgs (List[Image]): Original batch of handwritten word image.
 
     Returns:
         (torch.tensor): Preprocessed word image batch.
@@ -190,14 +198,13 @@ def preprocess_images(imgs):
     new_imgs = []
     for i in imgs:
         i = np.array(i)
-        i = np.float32(i)
-        i = i / 255.0 # Rescaling to 0..1
         i = cv2.resize(i, (216, 64), interpolation=cv2.INTER_CUBIC) # resizing the image for VGG
         i = cv2.cvtColor(i, cv2.COLOR_RGB2GRAY) # Grayscaling the image
         _, i = cv2.threshold(i, 0.5, 1, cv2.THRESH_OTSU) # thresholding with Otsu's method for binarization
+        i = np.float32(i)
         new_imgs.append(i)
     new_imgs = shuffle_and_repeat(new_imgs)
-    new_imgs = np.array(new_imgs)
+    new_imgs = np.array(new_imgs).reshape((1, 50, 64, 216))
     return torch.from_numpy(new_imgs)
 
 
@@ -216,10 +223,11 @@ def normalize(img):
     return img
 
 
-def convert_to_images(text_dataloader, preprocessed_imgs, device):
+def convert_to_images(gen, text_dataloader, preprocessed_imgs, device):
     """Converts the words from the document to handwritten word images in the style of preprocessed_images.
 
     Args:
+        gen (torch.nn.module): The generator model.
         text_dataloader (torch.utils.data.DataLoader): DataLoader object for the words from the document. 
         preprocessed_imgs (torch.tensor): The handwritting images after preprocessing.
         device (string): The device on which to do the conversion(cuda/cpu).
@@ -232,7 +240,7 @@ def convert_to_images(text_dataloader, preprocessed_imgs, device):
 
         imgs = []
         for idx, word_batch in enumerate(text_dataloader):
-            word_batch = word_batch.to(device)
+            word_batch = word_batch[0].to(device)
 
             f_xt, f_embed = gen.enc_text(word_batch, style.shape)
             f_mix = gen.mix(style[0:2], f_embed)
