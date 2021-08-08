@@ -3,7 +3,7 @@ import os
 import torch
 import cv2
 from torch import nn
-from modules.blocks import LinearBlock, Conv2dBlock, ResBlock, ActFirstResBlock
+from modules.blocks import LinearBlock, Conv2dBlock, ResBlocks, ActFirstResBlock
 from modules.VGG import vgg19_bn
 
 
@@ -28,10 +28,12 @@ class GenModel_FC(nn.Module):
         ff = self.linear_mix(f) # b,8,27,1024->b,8,27,512
         return ff.permute(0, 3, 1, 2)
 
+
 class TextEncoder_FC(nn.Module):
     def __init__(self, text_max_len):
         super(TextEncoder_FC, self).__init__()
         embed_size = 64
+        vocab_size = 55
         self.embed = nn.Embedding(vocab_size, embed_size)
         self.fc = nn.Sequential(
                 nn.Linear(text_max_len*embed_size, 1024),
@@ -87,13 +89,14 @@ class ImageEncoder(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+
 class Decoder(nn.Module):
     def __init__(self, ups=3, n_res=2, dim=512, out_dim=1, res_norm='adain', activ='relu', pad_type='reflect'):
         super(Decoder, self).__init__()
 
         self.model = []
         self.model += [ResBlocks(n_res, dim, res_norm,
-                                 activ, pad_type=pad_type)]
+                                activation=activ, pad_type=pad_type)]
         for i in range(ups):
             self.model += [nn.Upsample(scale_factor=2),
                            Conv2dBlock(dim, dim // 2, 5, 1, 2,
