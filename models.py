@@ -2,17 +2,17 @@ import numpy as np
 import os
 import torch
 import cv2
+from torch import nn
 from modules.blocks import LinearBlock, Conv2dBlock, ResBlock, ActFirstResBlock
 from modules.VGG import vgg19_bn
 
-cuda = torch.device('cuda')
 
 class GenModel_FC(nn.Module):
     def __init__(self, text_max_len):
         super(GenModel_FC, self).__init__()
-        self.enc_image = ImageEncoder().to(gpu)
-        self.enc_text = TextEncoder_FC(text_max_len).to(gpu)
-        self.dec = Decoder().to(gpu)
+        self.enc_image = ImageEncoder()
+        self.enc_text = TextEncoder_FC(text_max_len)
+        self.dec = Decoder()
         self.linear_mix = nn.Linear(1024, 512)
 
     def decode(self, content, adain_params):

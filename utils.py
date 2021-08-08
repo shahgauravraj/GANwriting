@@ -2,6 +2,7 @@ import wandb
 import string
 import cv2
 import torch
+import random
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 from models import GenModel_FC
@@ -29,8 +30,8 @@ def get_model():
     artifact = api.artifact('bijin/GANwriting_Reproducibilty_Challenge/GANwriting:v237', type='model')
     model_dir = artifact.download() + '/contran-5000.model'
     
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    weights = torch.load(model_dir)
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    weights = torch.load(model_dir, map_location=torch.device('cpu'))
     gen = GenModel_FC(12)
     state_dict = gen.state_dict()
 
@@ -154,24 +155,48 @@ def preprocess_text(text, max_input_size=10):
     return DataLoader(dataset, batch_size=8, shuffle=False), spaces, indents, imgs_per_line
 
 
+def shuffle_and_repeat(imgs):
+    """Takes the original list or images, shuffles them and if there are less than 50 images, repeats them until we get 50.
+
+    Args:
+        imgs (List[np.array]): A list of images as numpy arrays. 
+
+    Returns:
+        new_imgs (List[np.array]): A list of images as numpy arrays of size 50.
+    """    
+    new_imgs = []
+    l = len(imgs)
+    idx = l
+    shuffle = list(range(l))
+    while len(new_imgs) < 50:
+        if idx == l:
+            shuffle = random.shuffle(shuffle)
+            idx = 0
+        new_imgs.append(imgs[shuffle[idx]])
+        idx += 1
+    return new_imgs
+
+
 def preprocess_images(imgs):
     """Rescales, resizes and binarizes a batch of images of handwritten words and returns it as a tensor.
     If there are less than 50 images, the original list is shuffled and repeated until 50 is reached.
 
     Args:
-        imgs (np.array[np.uint8]): Original batch of handwritten word image.
+        imgs (Image): Original batch of handwritten word image.
 
     Returns:
         (torch.tensor): Preprocessed word image batch.
     """
     new_imgs = []
     for i in imgs:
+        i = np.array(i)
         i = np.float32(i)
         i = i / 255.0 # Rescaling to 0..1
         i = cv2.resize(i, (216, 64), interpolation=cv2.INTER_CUBIC) # resizing the image for VGG
         i = cv2.cvtColor(i, cv2.COLOR_RGB2GRAY) # Grayscaling the image
         _, i = cv2.threshold(i, 0.5, 1, cv2.THRESH_OTSU) # thresholding with Otsu's method for binarization
         new_imgs.append(i)
+    new_imgs = shuffle_and_repeat(new_imgs)
     new_imgs = np.array(new_imgs)
     return torch.from_numpy(new_imgs)
 
