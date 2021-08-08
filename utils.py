@@ -6,6 +6,7 @@ import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 from models import GenModel_FC
 from collections import defaultdict
+from PIL import Image
 
 # special tokens
 START = 0
@@ -21,7 +22,7 @@ def get_model():
     """Downloads the model artifact from wandb and loads the weights from it into a new generator object.
 
     Returns:
-        gen (torch.nn.moule): The pretrained generator model.
+        gen (torch.nn.module): The pretrained generator model.
         device (string): The device the model is on (cuda/cpu).
     """    
     api = wandb.Api()
@@ -74,10 +75,10 @@ def get_words(text):
         text (string): The document to convert in string form.
 
     Returns:
-        words(List[List[string]]): A list of lists of words.
-        spaces(dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of spaces. 
-        indents(dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of indents. 
-        imgs_per_line(dict[int]): A dict of the number of images in each line.
+        words (List[List[string]]): A list of lists of words.
+        spaces (dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of spaces. 
+        indents (dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of indents. 
+        imgs_per_line (dict[int]): A dict of the number of images in each line.
     """
     lines = list(map(strip, text.split("\n")))[::2]
     
@@ -115,7 +116,7 @@ def convert_and_pad(word):
         word (string): A string of characters of max length 10.
 
     Returns:
-        List[int]: A list of ints representing the tokens. 
+       new_word (List[int]): A list of ints representing the tokens. 
     """    
     new_word = [letter2index[w] for w in word] # Converting each character to its token value 
     new_word = [START] + new_word + [STOP] # START + chars + STOP
@@ -124,18 +125,23 @@ def convert_and_pad(word):
     return new_word
 
 
-def preprocess_text(words, max_input_size=10):
+def preprocess_text(text, max_input_size=10):
     """Converts the each word into a list of tokens, bounded by start and end token. 
     Padding tokens added if necessary to reach max_input_size and splitting if the original word is too long.
 
     Args:
-        words (List[str]): A batch of words as an array of strings.
+        text (string): The document to convert in string form.
         max_input_size (int): The max number of tokens in each input
 
     Returns:
-        torch.data.utils.DataLoader: A dataloader to the dataset of words converted to tensors with batch size 8.
+        (torch.data.utils.DataLoader): A dataloader to the dataset of words converted to tensors with batch size 8.
+        spaces (dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of spaces. 
+        indents (dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of indents. 
+        imgs_per_line (dict[int]): A dict of the number of images in each line.
     """       
+    words, spaces, indents, imgs_per_line = get_words(text)
     new_words = []
+
     for w in words:
         w_len = len(w)
         while (w_len > 0):
@@ -145,7 +151,7 @@ def preprocess_text(words, max_input_size=10):
         
     new_words = torch.from_numpy(np.array(new_words))
     dataset = TensorDataset(new_words)
-    return DataLoader(dataset, batch_size=8, shuffle=False)   
+    return DataLoader(dataset, batch_size=8, shuffle=False), spaces, indents, imgs_per_line
 
 
 def preprocess_images(imgs):
@@ -156,7 +162,7 @@ def preprocess_images(imgs):
         imgs (np.array[np.uint8]): Original batch of handwritten word image.
 
     Returns:
-        torch.tensor: Preprocessed word image batch.
+        (torch.tensor): Preprocessed word image batch.
     """
     new_imgs = []
     for i in imgs:
@@ -194,7 +200,7 @@ def convert_to_images(text_dataloader, preprocessed_imgs, device):
         device (string): The device on which to do the conversion(cuda/cpu).
 
     Returns:
-        List[np.array]: A list of images as numpy arrays.
+        imgs (List[np.array]): A list of images as numpy arrays.
     """    
     with torch.no_grad():
         style = gen.enc_image(preprocessed_imgs.to(device))
@@ -213,6 +219,24 @@ def convert_to_images(text_dataloader, preprocessed_imgs, device):
     return imgs
 
 
+def imgs_to_pdf(imgs):
+    """Converts a list of images to pdf format.
+
+    Args:
+        imgs (List[np.array]): A list of images as numpy arrays.
+
+    Returns:
+        pdf_path (string): Path to the file where the pdf was saved. 
+    """    
+    new_imgs = []
+    for i in imgs:
+        new_imgs.append(Image.fromarray(i).convert('RGB')) # converting each array to PIL Image objects
+
+    pdf_path = "need/to/put/something/here.pdf" # maybe use a random word generator?
+    new_imgs[0].save(pdf_path, save_all=True, append_images=new_imgs[1:])
+    return pdf_path
+
+
 def postprocess_images(imgs, spaces, indents, imgs_per_line):
     """Converts the list of np.array to a pdf file.
 
@@ -223,7 +247,7 @@ def postprocess_images(imgs, spaces, indents, imgs_per_line):
         imgs_per_line (dict[int]): A dict of ints containing number of images to put in each line. 
 
     Returns:
-        file: The handwritten document in pdf form.
+        (file): The handwritten document in pdf form.
     """
     # TODO
     return ret

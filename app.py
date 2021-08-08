@@ -21,7 +21,8 @@ def root():
     if request.method == 'GET':
         render_template(TEMPLATE_PATH)
     else:
-        return handle_post(request)
+        path = handle_post(request)
+        return send_file(path, as_attachment=True)
 
 
 def handle_post(request):
@@ -31,7 +32,7 @@ def handle_post(request):
         request (HTTP.POST): The post request from the client containing handwritting samples and document as a string.
 
     Returns:
-        (file) : The conversion output as a pdf.
+        path (str) : The path to conversion output as a pdf file.
     """        
     # Preprocessing the handwritting images
     imgs = request.files['imgs']
@@ -39,8 +40,7 @@ def handle_post(request):
 
     # Preprocessing the text
     text = request.files['text']
-    text, spaces, indents, imgs_per_line = utils.get_words(text)
-    text_dataloader = utils.preprocess_text(text)
+    text_dataloader, spaces, indents, imgs_per_line = utils.preprocess_text(text)
 
     # Converting to images
     imgs = utils.convert_to_images(text_dataloader, preprocessed_imgs, device)
