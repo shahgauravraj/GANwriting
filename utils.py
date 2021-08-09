@@ -122,6 +122,7 @@ def convert_and_pad(word):
     Returns:
        new_word (List[int]): A list of ints representing the tokens. 
     """    
+    new_word = []
     for w in word:
         if w in letter2index:
             new_word.append(letter2index[w]) # Converting each character to its token value, ignoring special non alphabetic characters
@@ -145,8 +146,6 @@ def preprocess_text(text, max_input_size=10):
         indents (dict[set[int]]): A dict of sets where each key in the dict refers to the line number and each item in the sets refer to indices of indents. 
         imgs_per_line (dict[int]): A dict of the number of images in each line.
     """
-    text_path = random.choice(string.ascii_letters)    
-    text.save()
     words, spaces, indents, imgs_per_line = get_words(text)
     new_words = []
 
@@ -202,6 +201,8 @@ def preprocess_images(imgs):
         i = cv2.cvtColor(i, cv2.COLOR_RGB2GRAY) # Grayscaling the image
         _, i = cv2.threshold(i, 0.5, 1, cv2.THRESH_OTSU) # thresholding with Otsu's method for binarization
         i = np.float32(i)
+        i = 1 - i
+        i = (i - 0.5) / 0.5
         new_imgs.append(i)
     new_imgs = shuffle_and_repeat(new_imgs)
     new_imgs = np.array(new_imgs).reshape((1, 50, 64, 216))
@@ -237,13 +238,13 @@ def convert_to_images(gen, text_dataloader, preprocessed_imgs, device):
     """    
     with torch.no_grad():
         style = gen.enc_image(preprocessed_imgs.to(device))
-
+        style = style.expand((8, 50, 64, 216))
         imgs = []
         for idx, word_batch in enumerate(text_dataloader):
             word_batch = word_batch[0].to(device)
 
             f_xt, f_embed = gen.enc_text(word_batch, style.shape)
-            f_mix = gen.mix(style[0:2], f_embed)
+            f_mix = gen.mix(style, f_embed)
             xg = gen.decode(f_mix, f_xt).cpu().detach().numpy()
 
             for x in xg:
