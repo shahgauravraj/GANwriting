@@ -7,6 +7,18 @@ from modules.blocks import LinearBlock, Conv2dBlock, ResBlocks, ActFirstResBlock
 from modules.VGG import vgg19_bn
 
 
+def assign_adain_params(adain_params, model):
+    # assign the adain_params to the AdaIN layers in model
+    for m in model.modules():
+        if m.__class__.__name__ == "AdaptiveInstanceNorm2d":
+            mean = adain_params[:, :m.num_features]
+            std = adain_params[:, m.num_features:2*m.num_features]
+            m.bias = mean.contiguous().view(-1)
+            m.weight = std.contiguous().view(-1)
+            if adain_params.size(1) > 2*m.num_features:
+                adain_params = adain_params[:, 2*m.num_features:]
+                
+
 class GenModel_FC(nn.Module):
     def __init__(self, text_max_len):
         super(GenModel_FC, self).__init__()

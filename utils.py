@@ -10,7 +10,6 @@ from models import GenModel_FC
 from collections import defaultdict
 from PIL import Image
 
-counter = 0
 
 # special tokens
 START = 0
@@ -219,6 +218,7 @@ def normalize(img):
         img (np.array): 3D array of 8-bit unsigned ints .
     """    
     img = (img - img.min()) / (img.max() - img.min())
+    img = 1 - img
     img *= 255
     img = np.uint8(img)
     return img
@@ -238,13 +238,16 @@ def convert_to_images(gen, text_dataloader, preprocessed_imgs, device):
     """    
     with torch.no_grad():
         style = gen.enc_image(preprocessed_imgs.to(device))
-        style = style.expand((8, 50, 64, 216))
         imgs = []
         for idx, word_batch in enumerate(text_dataloader):
             word_batch = word_batch[0].to(device)
-
+            
             f_xt, f_embed = gen.enc_text(word_batch, style.shape)
-            f_mix = gen.mix(style, f_embed)
+
+            # the size we need the style tensor to be, 0th index is usually batch size but sometimes smaller, rest is unchanged
+            size = [word_batch.shape[0]] + list(style.shape[1:]) 
+            f_mix = gen.mix(style.expand(size), f_embed)
+            
             xg = gen.decode(f_mix, f_xt).cpu().detach().numpy()
 
             for x in xg:
