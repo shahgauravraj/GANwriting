@@ -4,6 +4,8 @@ import cv2
 import torch
 import random
 import docx2txt
+import os
+import shutil
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 from models import GenModel_FC
@@ -47,6 +49,47 @@ def get_model():
     gen.load_state_dict(state_dict)
     gen = gen.to(device)
     return gen, device
+
+
+def get_run_id():
+    """Produces a random string of lowercase ascii characters of size 10 to serve as a run id. Also creates a dir of the same name in ./temp to store run artifacts temporarily. Ensures that the id is not currently in use by checking for existing dir of same name.
+
+    Returns:
+        id (string): Identifier string. 
+    """    
+    size = 10
+    while True:
+        id = "".join(random.choice(string.ascii_lowercase) for _ in range(size))
+        if not os.path.isdir('./temp/' + id):
+            os.mkdir('./temp/' + id)
+            break
+    return id
+
+# TODO: TEST THIS WITH FRONTEND
+def convert_files(id, imgs, text):
+    """Converts the image files received through request into PIL Images and the text file into a string.
+
+    Args:
+        id (string): An identifier for the run, used here as the name for a temp directory.
+        imgs (List[file]): A list of image files to convert.
+        text (file): The document file to convert.
+
+    Returns:
+        new_imgs (List[Image]): A list of PIL Image objects, to be preprocessed.
+        new_text (string): The text file converted to string form.
+    """    
+    new_imgs = []
+    for i, img in enumerate(imgs):
+        # Current directory to save images in.
+        img_path = './temp/' + id + str(i) + '.jpg'
+        img.save(img_path)
+        new_img = im.open(img_path).convert('RGB')
+        new_imgs.append(new_img)
+
+    text_path = './temp/' + id + 'text.docx' 
+    text.save(text_path)
+    new_text = docx2txt.process(text_path)
+    return new_imgs, new_text
 
 
 def strip(s):    
@@ -140,7 +183,7 @@ def preprocess_text(text, max_input_size=10):
     Padding tokens added if necessary to reach max_input_size and splitting if the original word is too long.
 
     Args:
-        text (file): The document to convert in string form.
+        text (string): The document to convert in string form.
         max_input_size (int): The max number of tokens in each input
 
     Returns:
@@ -187,6 +230,24 @@ def shuffle_and_repeat(imgs):
     return new_imgs
 
 
+def resize_and_threshold(img, thresh, high):
+    """Resizes the image to (216, 64) and does Otsu's thresholding on it.
+
+    Args:
+        img (np.array[np.uint8]): Image to be processed.
+        mid (int|float): Initial threshold for Otsu's method.
+        high (int|float): Max value of the image for Otsu's thresholding.
+
+    Returns:
+        img (np.array[np.uint8]): The processed image, pixels will be either 0 or high.
+    """    
+    if len(img.shape)==3 and img.shape[2]==3:
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) # Grayscaling the image
+    img = cv2.resize(img, (216, 64), interpolation=cv2.INTER_CUBIC) # resizing the image for VGG
+    _, img = cv2.threshold(img, thresh, high, cv2.THRESH_OTSU) # thresholding with Otsu's method for binarization
+    return img
+
+
 def preprocess_images(imgs):
     """Rescales, resizes and binarizes a batch of images of handwritten words and returns it as a tensor.
     If there are less than 50 images, the original list is shuffled and repeated until 50 is reached.
@@ -200,9 +261,7 @@ def preprocess_images(imgs):
     new_imgs = []
     for i in imgs:
         i = np.array(i)
-        i = cv2.resize(i, (216, 64), interpolation=cv2.INTER_CUBIC) # resizing the image for VGG
-        i = cv2.cvtColor(i, cv2.COLOR_RGB2GRAY) # Grayscaling the image
-        _, i = cv2.threshold(i, 0.5, 1, cv2.THRESH_OTSU) # thresholding with Otsu's method for binarization
+        i = resize_and_threshold(i, 0.5, 1)
         i = np.float32(i)
         i = 1 - i
         i = (i - 0.5) / 0.5
@@ -219,7 +278,7 @@ def normalize(img):
         img (np.array): 3D array of floats.
 
     Returns:
-        img (np.array): 3D array of 8-bit unsigned ints .
+        img (np.array): 3D array of 8-bit unsigned ints, pixels will be in range 0..255.
     """    
     img = (img - img.min()) / (img.max() - img.min())
     img = 1 - img
@@ -238,7 +297,7 @@ def convert_to_images(gen, text_dataloader, preprocessed_imgs, device):
         device (string): The device on which to do the conversion(cuda/cpu).
 
     Returns:
-        imgs (List[np.array]): A list of images as numpy arrays.
+        imgs (List[np.array]): A list of images as numpy arrays, pixels will be in range 0..255.
     """    
     with torch.no_grad():
         style = gen.enc_image(preprocessed_imgs.to(device))
@@ -343,9 +402,10 @@ def postprocess_images(imgs, spaces, indents, imgs_per_line):
         spaces (dict[set[int]]): A dict of sets of ints containing positions of spaces in each line. 
         indents (dict[set[int]]): A dict of sets of ints containing the positions of indents in each ine.
         imgs_per_line (dict[int]): A dict of ints containing number of images to put in each line. 
-
-    Returns:
-        (file): The handwritten document in pdf form.
     """
     # TODO
-    return ret
+    pass
+
+
+def cleanup_temp_files(id):
+    pass
