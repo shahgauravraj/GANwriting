@@ -2,9 +2,10 @@ from flask import Flask, jsonify, request, render_template, send_file
 import utils
 
 
-TEMPLATE_PATH = "path/to/html/here"
+TEMPLATE_PATH = "home.html"
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
+
 gen, device = utils.get_model()
 gen.eval()
 
@@ -19,7 +20,7 @@ def root():
         [type]: [description]
     """    
     if request.method == 'GET':
-        render_template(TEMPLATE_PATH)
+        return render_template(TEMPLATE_PATH)
     else:
         path = handle_post(request)
         return send_file(path, as_attachment=True)
@@ -30,10 +31,10 @@ def handle_post(request):
 
     Args:
         request (HTTP.POST): The post request from the client containing handwritting samples and document as a string.
-
+        
     Returns:
         path (str) : The path to conversion output as a pdf file.
-    """        
+    """  
     # Preprocessing the handwritting images
     imgs = request.files['imgs']
     preprocessed_imgs = utils.preprocess_images(imgs)
