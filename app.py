@@ -24,14 +24,15 @@ def root():
     else:
         # create a random run id      
         id = utils.get_random_run_id()
+        # Doing this so cleanup still runs afterwards, might not actually work.
         try:
-            path = handle_post(request, id)
+            handle_post(request, id)
+            path = './temp/' + id + '/out.pdf' 
+            return send_file(path, as_attachment=True)
         except:
             pass
         finally:
-            # Delete all temp files.
             utils.cleanup_temp_files(id)
-        return send_file(path, as_attachment=True)
 
 
 def handle_post(request, id):
@@ -40,9 +41,6 @@ def handle_post(request, id):
     Args:
         request (HTTP.POST): The post request from the client containing handwritting samples and document as a string.
         id (string): Id of the current run. Used as the directory name where temp files are stored.
-        
-    Returns:
-        id (str) : The path to temp forlder where the pdf file is stored.
     """  
 
     # Take the received files and convert into required formats
@@ -59,7 +57,4 @@ def handle_post(request, id):
     # Converting to images
     imgs = utils.convert_to_images(gen, text_dataloader, preprocessed_imgs, device)
     
-    # TODO: write postprocess function
-    ret = postprocess_images(imgs, spaces, indents, imgs_per_line)
-
-    return id
+    postprocess_images(imgs, spaces, indents, imgs_per_line)

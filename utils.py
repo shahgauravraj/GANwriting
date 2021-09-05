@@ -5,7 +5,7 @@ import torch
 import random
 import docx2txt
 import os
-import shutil
+import glob
 import math
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
@@ -432,4 +432,12 @@ def postprocess_images(imgs, spaces, indents, imgs_per_line, id):
 
 
 def cleanup_temp_files(id):
-    pass
+    """Deletes current temp dir including all its files.
+
+    Args:
+        id (string): An identifier for the run, used as the name for a temp directory.
+    """    
+    files = glob.glob('./temp/' + id + '/*.*')
+    for f in files:
+        os.remove(f)
+    os.rmdir('./temp/' + id)
