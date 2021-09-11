@@ -66,7 +66,7 @@ def get_run_id():
             break
     return id
 
-# TODO: TEST THIS WITH FRONTEND
+
 def convert_files(id, imgs, text):
     """Converts the image files received through request into PIL Images and the text file into a string.
 
@@ -82,14 +82,15 @@ def convert_files(id, imgs, text):
     new_imgs = []
     for i, img in enumerate(imgs):
         # Current directory to save images in.
-        img_path = './temp/' + id + str(i) + '.jpg'
+        img_path = './temp/' + id + f'/{str(i)}' + '.jpg'
         img.save(img_path)
         new_img = im.open(img_path).convert('RGB')
         new_imgs.append(new_img)
-
-    text_path = './temp/' + id + 'text.docx' 
+    
+    text_path = './temp/' + id + '/text.docx' 
     text.save(text_path)
     new_text = docx2txt.process(text_path)
+
     return new_imgs, new_text
 
 
@@ -304,7 +305,7 @@ def convert_to_images(gen, text_dataloader, preprocessed_imgs, device):
         style = gen.enc_image(preprocessed_imgs.to(device))
         imgs = []
         for idx, word_batch in enumerate(text_dataloader):
-            word_batch = word_batch[0].to(device)
+            word_batch = word_batch[0].to(device).long()
             
             f_xt, f_embed = gen.enc_text(word_batch, style.shape)
 
@@ -439,5 +440,18 @@ def cleanup_temp_files(id):
     """    
     files = glob.glob('./temp/' + id + '/*.*')
     for f in files:
-        os.remove(f)
-    os.rmdir('./temp/' + id)
+        try:
+            os.remove(f)
+        except:
+            print(f, "failed to delete")
+
+    # Another pass to cleanup pdf files, only deletes unused pdfs on windows
+    # Could cause problems with multiple simultaeneous requests 
+    pdfs = glob.glob('./temp/*/*.pdf')
+    for pdf in pdfs:
+        try:
+            dirname = os.path.dirname(pdf) 
+            os.remove(pdf)
+            os.rmdir(dirname)
+        except:
+            print(pdf, "failed to delete")

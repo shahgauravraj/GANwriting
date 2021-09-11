@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, render_template, send_file
+from flask import Flask, request, render_template, send_file, after_this_request
 import utils
 
 
@@ -11,6 +11,7 @@ gen.eval()
 
 
 @app.route('/', methods = ['GET', 'POST'])
+@app.route('/home', methods = ['GET', 'POST'])
 def root():
     """Handles requests from root url.
     On GET request serves index page template.
@@ -23,16 +24,19 @@ def root():
         return render_template(TEMPLATE_PATH)
     else:
         # create a random run id      
-        id = utils.get_random_run_id()
-        # Doing this so cleanup still runs afterwards, might not actually work.
-        try:
-            handle_post(request, id)
-            path = './temp/' + id + '/out.pdf' 
-            return send_file(path, as_attachment=True)
-        except:
-            pass
-        finally:
-            utils.cleanup_temp_files(id)
+        id = utils.get_run_id()
+        # Doing this so cleanup still runs afterwards.
+        @after_this_request
+        def cleanup(f):
+            try:
+                utils.cleanup_temp_files(id)
+            except:
+                print('Cleanup failed')
+            return f
+
+        handle_post(request, id)
+        path = './temp/' + id + '/out.pdf'
+        return send_file(path, as_attachment=True)
 
 
 def handle_post(request, id):
@@ -44,8 +48,8 @@ def handle_post(request, id):
     """  
 
     # Take the received files and convert into required formats
-    imgs = request.files['imgs']
-    text = request.files['text']
+    imgs = request.files.getlist('images[]')
+    text = request.files['document']
     imgs, text = utils.convert_files(id, imgs, text)
 
     # Preprocessing the handwritting images
@@ -57,4 +61,4 @@ def handle_post(request, id):
     # Converting to images
     imgs = utils.convert_to_images(gen, text_dataloader, preprocessed_imgs, device)
     
-    postprocess_images(imgs, spaces, indents, imgs_per_line)
+    utils.postprocess_images(imgs, spaces, indents, imgs_per_line, id)
