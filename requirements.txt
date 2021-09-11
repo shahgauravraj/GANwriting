@@ -9,5 +9,3 @@ torchvision==0.6.1
 wandb
 Flask
 docx2txt
-
-This is new line.
